@@ -1,64 +1,36 @@
-## Route Optimization Implementation Plan
+## Frontend Integration: Visualizing Optimized Routes on the Map
 
-The next major step is to implement the route optimization logic on the backend. This involves defining the optimization problem, integrating OR-Tools for solving the Vehicle Routing Problem (VRP), and setting up the necessary API endpoints.
+Now that the backend route optimization (including LightGBM for time/distance estimations) is functional, the next critical step is to integrate these optimized routes into the frontend map view. This will provide users with a visual representation of the planned deliveries.
 
 ### Detailed Steps:
 
-1.  **Backend Module Structure:**
-    *   Create a new directory and module, e.g., `backend/routers/optimization.py`, to house the route optimization API endpoints and logic.
-    *   Integrate this new router into `backend/main.py`.
+1.  **Update `frontend/src/app/vehicles/page.tsx`:**
+    *   **State Management:** Introduce new state variables to `page.tsx` to store the fetched `optimizedRoutes` and `unassignedOrders` from the backend.
+    *   **User Interaction for Optimization:**
+        *   Add a new button, e.g., "Optimize Routes", to the `/vehicles` page.
+        *   When this button is clicked, gather the currently available orders and vehicles from the frontend state.
+        *   Make a `POST` request to your backend's `/optimize_routes` endpoint, sending the gathered orders and vehicles in the format expected by `OptimizeRouteRequest`.
+        *   Handle the response: Store the `optimizedRoutes` and `unassignedOrders` in the new state variables. Implement basic error handling for failed requests.
 
-2.  **Pydantic Models for Request and Response:**
-    *   Define input models in `backend/schemas.py`:
-        *   `Location (latitude: float, longitude: float)`: A reusable model for geographical coordinates.
-        *   `OrderInOptimization (id: int, pickup_location: Location, dropoff_location: Location)`: Represents an order with its relevant locations for optimization.
-        *   `VehicleInOptimization (id: int, start_location: Location, end_location: Location = None)`: Represents a vehicle with its starting and optional ending location for optimization.
-        *   `OptimizeRouteRequest (orders: List[OrderInOptimization], vehicles: List[VehicleInOptimization])`: The main request body for the optimization endpoint.
-    *   Define output models in `backend/schemas.py`:
-        *   `Stop (order_id: int, location: Location, type: str)`: Represents a single stop in a route (e.g., "pickup", "dropoff").
-        *   `OptimizedRoute (vehicle_id: int, stops: List[Stop], total_distance: float = None, total_time: float = None)`: Represents an optimized route for a single vehicle.
-        *   `OptimizedRouteResponse (optimized_routes: List[OptimizedRoute], unassigned_orders: List[int] = None)`: The overall response for the optimization endpoint.
+2.  **Enhance `frontend/src/app/vehicles/MapWrapper.tsx`:**
+    *   **New Props:** Modify the `MapWrapperProps` interface to accept `optimizedRoutes: OptimizedRoute[]` and `unassignedOrders: number[]` as new props.
+    *   **Drawing Polylines:**
+        *   Use `react-leaflet`'s `<Polyline>` component to draw each optimized route. Iterate through the `optimizedRoutes` prop.
+        *   For each `OptimizedRoute`, extract the `location` (latitude, longitude) of each `stop` and use these points to define the `positions` prop of the `<Polyline>`.
+        *   Assign a distinct color or style to each polyline (e.g., using `vehicle_id` to generate a color, or cycling through a predefined set of colors).
+        *   Consider adding tooltips or popups to polylines showing `total_distance` and `total_time`.
+    *   **Visualizing Stops (Recommended):**
+        *   Within each `OptimizedRoute`'s `Polyline` rendering, iterate through its `stops`.
+        *   For each `stop`, render an additional `<Marker>` at its `location`.
+        *   Use different icons or colors for "pickup" stops vs. "dropoff" stops (e.g., green for pickup, red for dropoff).
+        *   Add a `Popup` to these stop markers to display `order_id` and `type` of stop.
+    *   **Highlighting Unassigned Orders:** If `unassignedOrders` are present, consider visually highlighting the corresponding order markers on the map (e.g., with a distinct color or icon) to indicate they were not included in an optimized route.
 
-3.  **Route Optimization Endpoint (`POST /optimize_routes`):**
-    *   Implement a new asynchronous endpoint in `backend/routers/optimization.py`:
-        ```python
-        @router.post("/optimize_routes", response_model=OptimizedRouteResponse)
-        async def optimize_routes(request: OptimizeRouteRequest):
-            # Optimization logic will go here
-            pass
-        ```
-    *   This endpoint will:
-        *   Receive a list of orders and available vehicles.
-        *   Utilize the OR-Tools library to solve a basic Vehicle Routing Problem (VRP) to determine the optimal sequence of pickups and dropoffs for each vehicle.
-        *   Initially, use Euclidean distance for simplicity. We can integrate a proper mapping service (e.g., OpenStreetMap, Google Maps API) for real road distances in a later iteration.
-        *   Map the OR-Tools solution back to the `OptimizedRouteResponse` Pydantic model.
-        *   Return the optimized routes and any unassigned orders.
+3.  **Refine Pydantic Models (if necessary):**
+    *   Review `backend/schemas.py` to ensure the `OptimizedRouteResponse` and its nested models (`OptimizedRoute`, `Stop`, `Location`) are precisely aligned with the data structure you're receiving from the backend and expect to use in the frontend. Ensure all fields are correctly typed (e.g., `total_distance` and `total_time` are `float`, not `None`).
 
-4.  **Initial OR-Tools Integration Logic:**
-    *   Inside the `optimize_routes` endpoint, set up the OR-Tools routing model:
-        *   Create a `routing_index_manager`.
-        *   Create a `routing_model`.
-        *   Define the transit callback (distance callback) using the locations from orders and vehicles.
-        *   Add a dimension for distance (and potentially time later).
-        *   Add capacity constraints if applicable (e.g., number of orders per vehicle).
-        *   Add pickup and delivery pairs for orders.
-        *   Set search parameters and solve the model.
-        *   Parse the solution to populate the `OptimizedRouteResponse`.
+4.  **Backend Considerations (Minor Adjustments):**
+    *   Ensure your backend's `optimize_routes` endpoint is correctly populating `total_distance` and `total_time` from LightGBM's predictions, as these will be consumed by the frontend.
+    *   Confirm that the `type` field in the `Stop` model (e.g., "pickup", "dropoff") is consistently set by the backend, as the frontend will use this for visualization.
 
-5.  **LightGBM Integration for Enhanced Time/Distance Calculations:**
-    *   **Objective:** The primary goal is to move beyond simple Euclidean distance to more realistic travel time and distance estimations by leveraging LightGBM's predictive capabilities. This will enable the `total_distance` and `total_time` fields in `OptimizedRoute` to be populated with meaningful data.
-
-    *   **LightGBM Setup:**
-        *   Install the `lightgbm` Python package: `pip install lightgbm`.
-        *   For demonstration purposes, create a placeholder or simulated LightGBM model. This model will not be trained on real-world data initially, but will simulate predicting travel times/distances based on simple features (e.g., Euclidean distance, hypothetical road types).
-
-    *   **Data Simulation for LightGBM (Initial):**
-        *   Since real-time traffic data or extensive historical route data is out of scope for initial setup, we will create a *dummy dataset* and a *simple LightGBM model* that takes Euclidean distance as input and outputs a slightly modified "predicted" travel time or distance. This allows us to integrate the model without needing complex data pipelines immediately.
-
-    *   **Integration into OR-Tools (Updating Callbacks):**
-        *   **Modify the `distance_callback`:** The existing `distance_callback` will be updated to utilize the LightGBM model's predictions. Instead of directly returning Euclidean distance, it will pass features (like Euclidean distance) to the LightGBM model and return its prediction for travel distance/time.
-        *   **Add a `time_callback` (if distinct):** If we want to optimize for both distance and time, a separate `time_callback` can be registered with OR-Tools, also leveraging LightGBM's predictions.
-        *   **Update OR-Tools Dimensions:** Ensure OR-Tools dimensions (`AddDimension`) are correctly set up to use these new predictive callbacks for both distance and time.
-
-    *   **Populating Response Models:**
-        *   The `total_distance` and `total_time` fields in the `OptimizedRoute` model will be populated with the values derived from the OR-Tools solution, which will now be based on LightGBM's predictions.
+By following these steps, users will be able to trigger route optimization and visually inspect the results on the map, enhancing the core value proposition of EcoRoute.
