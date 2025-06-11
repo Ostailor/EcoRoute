@@ -5,12 +5,14 @@ from sqlalchemy.future import select
 from sqlalchemy.exc import NoResultFound
 from pydantic import BaseModel
 from typing import List
-from models import Order as OrderModel, Vehicle as VehicleModel
-from database import async_session_maker
+from .models import Order as OrderModel, Vehicle as VehicleModel
+from .database import async_session_maker
+from .routers.optimization import router as optimization_router
 from sqlalchemy import text
 import socketio
 
 app = FastAPI()
+app.include_router(optimization_router)
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"])
 
