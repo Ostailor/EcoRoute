@@ -67,9 +67,6 @@ async def connect(sid, environ):
 async def disconnect(sid):
     print("disconnect ", sid)
 
-# Mount the Socket.IO app to the FastAPI app under a specific path
-app.mount("/socket.io", socketio.ASGIApp(sio))
-
 @app.get("/")
 async def health_check():
     return {"status": "ok"}
@@ -226,3 +223,6 @@ async def update_vehicle_telemetry(
     # Convert SQLAlchemy model to Pydantic model before emitting
     await sio.emit("vehicle_update", VehicleRead.model_validate(db_vehicle, from_attributes=True).model_dump())
     return db_vehicle 
+
+# Mount the Socket.IO app to the FastAPI app under a specific path
+app = socketio.ASGIApp(sio, other_asgi_app=app)
