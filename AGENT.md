@@ -45,9 +45,20 @@ The next major step is to implement the route optimization logic on the backend.
         *   Set search parameters and solve the model.
         *   Parse the solution to populate the `OptimizedRouteResponse`.
 
-5.  **LightGBM Integration (Future Consideration):**
-    *   While LightGBM is part of the project's tech stack, its direct integration into the *initial* route optimization will be deferred.
-    *   It could be used in future iterations for advanced features such as:
-        *   Predicting more accurate travel times based on historical traffic data.
-        *   Predicting delivery success rates or risks for different routes.
-        *   Estimating fuel consumption or emissions for sustainability optimization.
+5.  **LightGBM Integration for Enhanced Time/Distance Calculations:**
+    *   **Objective:** The primary goal is to move beyond simple Euclidean distance to more realistic travel time and distance estimations by leveraging LightGBM's predictive capabilities. This will enable the `total_distance` and `total_time` fields in `OptimizedRoute` to be populated with meaningful data.
+
+    *   **LightGBM Setup:**
+        *   Install the `lightgbm` Python package: `pip install lightgbm`.
+        *   For demonstration purposes, create a placeholder or simulated LightGBM model. This model will not be trained on real-world data initially, but will simulate predicting travel times/distances based on simple features (e.g., Euclidean distance, hypothetical road types).
+
+    *   **Data Simulation for LightGBM (Initial):**
+        *   Since real-time traffic data or extensive historical route data is out of scope for initial setup, we will create a *dummy dataset* and a *simple LightGBM model* that takes Euclidean distance as input and outputs a slightly modified "predicted" travel time or distance. This allows us to integrate the model without needing complex data pipelines immediately.
+
+    *   **Integration into OR-Tools (Updating Callbacks):**
+        *   **Modify the `distance_callback`:** The existing `distance_callback` will be updated to utilize the LightGBM model's predictions. Instead of directly returning Euclidean distance, it will pass features (like Euclidean distance) to the LightGBM model and return its prediction for travel distance/time.
+        *   **Add a `time_callback` (if distinct):** If we want to optimize for both distance and time, a separate `time_callback` can be registered with OR-Tools, also leveraging LightGBM's predictions.
+        *   **Update OR-Tools Dimensions:** Ensure OR-Tools dimensions (`AddDimension`) are correctly set up to use these new predictive callbacks for both distance and time.
+
+    *   **Populating Response Models:**
+        *   The `total_distance` and `total_time` fields in the `OptimizedRoute` model will be populated with the values derived from the OR-Tools solution, which will now be based on LightGBM's predictions.
