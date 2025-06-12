@@ -1,9 +1,8 @@
 "use client";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, useMap, Polyline, CircleMarker } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, Fragment } from "react";
 import L, { LatLngExpression, Marker as LeafletMarker } from "leaflet";
-import globeUrl from '/public/globe.svg';
 
 interface Vehicle {
   id: number;
@@ -13,9 +12,38 @@ interface Vehicle {
   current_lng: number | null;
 }
 
+interface Location {
+  latitude: number;
+  longitude: number;
+}
+
+interface Stop {
+  order_id: number;
+  location: Location;
+  type: string;
+}
+
+interface Order {
+  id: number;
+  pickup_lat?: number | null;
+  pickup_lng?: number | null;
+  dropoff_lat?: number | null;
+  dropoff_lng?: number | null;
+}
+
+interface OptimizedRoute {
+  vehicle_id: number;
+  stops: Stop[];
+  total_distance?: number | null;
+  total_time?: number | null;
+}
+
 interface MapWrapperProps {
   vehicles: Vehicle[];
   selectedVehicleId: number | null;
+  optimizedRoutes: OptimizedRoute[];
+  unassignedOrders: number[];
+  orders: Order[];
 }
 
 // Move getDivIcon outside the component to avoid it being recreated on every render
@@ -35,11 +63,17 @@ function getDivIcon(name: string, highlight: boolean) {
   });
 }
 
-export default function MapWrapper({ vehicles, selectedVehicleId }: MapWrapperProps) {
+export default function MapWrapper({ vehicles, selectedVehicleId, optimizedRoutes, unassignedOrders, orders }: MapWrapperProps) {
   const center: LatLngExpression = [0, 0]; // Default center
 
   // Store refs to LeafletMarker instances
   const markerRefs = useRef<{ [id: number]: LeafletMarker | null }>({});
+
+  useEffect(() => {
+    if (unassignedOrders.length > 0) {
+      console.log("Unassigned orders", unassignedOrders);
+    }
+  }, [unassignedOrders]);
 
   function MapEffectsAndUpdates() {
     const map = useMap();
@@ -56,11 +90,12 @@ export default function MapWrapper({ vehicles, selectedVehicleId }: MapWrapperPr
           }
         }
       }
-    }, [selectedVehicleId, map, vehicles]);
+    }, 
+    [selectedVehicleId, map, vehicles]);
 
     // Effect for updating all markers' positions, icons, and open popup content
     useEffect(() => {
-      vehicles.forEach(v => {
+      vehicles.forEach((v) => {
         const markerInstance = markerRefs.current[v.id];
         if (markerInstance && v.current_lat != null && v.current_lng != null) {
           const newLatLng: LatLngExpression = [v.current_lat, v.current_lng];
@@ -89,7 +124,45 @@ export default function MapWrapper({ vehicles, selectedVehicleId }: MapWrapperPr
           }
         }
       });
-    }, [vehicles, selectedVehicleId, map]);
+    }, 
+    [vehicles, selectedVehicleId, map]);
+
+    useEffect(() => {
+      const points: LatLngExpression[] = [];
+
+      vehicles.forEach((v) => {
+        if (v.current_lat != null && v.current_lng != null) {
+          points.push([v.current_lat, v.current_lng]);
+        }
+      });
+
+      optimizedRoutes.forEach((route) => {
+        route.stops.forEach((stop) => {
+          points.push([stop.location.latitude, stop.location.longitude]);
+        });
+      });
+
+      orders
+        .filter((o) => unassignedOrders.includes(o.id))
+        .forEach((o) => {
+          if (o.pickup_lat != null && o.pickup_lng != null) {
+            points.push([o.pickup_lat, o.pickup_lng]);
+          }
+          if (o.dropoff_lat != null && o.dropoff_lng != null) {
+            points.push([o.dropoff_lat, o.dropoff_lng]);
+          }
+        });
+
+      if (points.length === 1) {
+        map.setView(points[0], map.getZoom(), { animate: true });
+      } else if (points.length > 1) {
+        // Convert to LatLngTuple array for fitBounds
+        map.fitBounds(points as [number, number][], { padding: [20, 20] });
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [optimizedRoutes, unassignedOrders, vehicles]);
+
 
     return null;
   }
@@ -111,16 +184,16 @@ export default function MapWrapper({ vehicles, selectedVehicleId }: MapWrapperPr
           key={v.id} // Key for Marker to force re-render if vehicle ID changes (rare)
           position={[v.current_lat!, v.current_lng!] as LatLngExpression}
           icon={getDivIcon(v.name, selectedVehicleId === v.id)}
-          ref={(instance: any) => {
-            if (instance && instance.leafletElement) {
-              markerRefs.current[v.id] = instance.leafletElement as LeafletMarker; // Explicitly cast to LeafletMarker
+          ref={(instance: LeafletMarker | null) => {
+            if (instance) {
+              markerRefs.current[v.id] = instance;
             } else {
               delete markerRefs.current[v.id];
             }
           }}
         >
-          {/* Key on Popup to force re-mount and re-render when vehicle status/location changes */}
-          <Popup key={`${v.id}-${v.status}-${v.current_lat}-${v.current_lng}`}>
+          {/* Popup content will be updated via useEffect when vehicle data changes */}
+          <Popup>
             <div>
               <div className="font-bold">{v.name}</div>
               <div>Status: {v.status}</div>
@@ -129,6 +202,66 @@ export default function MapWrapper({ vehicles, selectedVehicleId }: MapWrapperPr
           </Popup>
         </Marker>
       ))}
+
+      {optimizedRoutes.map((route, idx) => {
+        const positions = route.stops.map((s) => [s.location.latitude, s.location.longitude] as LatLngExpression);
+        const colors = ["#1d4ed8", "#15803d", "#b91c1c", "#a21caf", "#be123c"];
+        const color = colors[idx % colors.length];
+        return (
+          <Fragment key={route.vehicle_id}>
+            <Polyline positions={positions} pathOptions={{ color }}>
+              <Popup>
+                <div>
+                  <div className="font-bold">Vehicle {route.vehicle_id}</div>
+                  {route.total_distance != null && (
+                    <div>Distance: {route.total_distance.toFixed(2)} km</div>
+                  )}
+                  {route.total_time != null && (
+                    <div>Time: {route.total_time.toFixed(2)} hr</div>
+                  )}
+                </div>
+              </Popup>
+            </Polyline>
+            {route.stops.map((stop, sidx) => (
+              <CircleMarker
+                key={`${route.vehicle_id}-${sidx}`}
+                center={[stop.location.latitude, stop.location.longitude] as LatLngExpression}
+                pathOptions={{ color: stop.type === "pickup" ? "green" : "red" }}
+                radius={6}
+              >
+                <Popup>
+                  Order {stop.order_id} ({stop.type})
+                </Popup>
+              </CircleMarker>
+            ))}
+          </Fragment>
+        );
+      })}
+
+      {orders
+        .filter((o) => unassignedOrders.includes(o.id))
+        .map((o) => (
+          <Fragment key={`unassigned-${o.id}`}>
+            {o.pickup_lat != null && o.pickup_lng != null && (
+              <CircleMarker
+                center={[o.pickup_lat, o.pickup_lng] as LatLngExpression}
+                pathOptions={{ color: "#eab308" }}
+                radius={5}
+              >
+                <Popup>Order {o.id} pickup (unassigned)</Popup>
+              </CircleMarker>
+            )}
+            {o.dropoff_lat != null && o.dropoff_lng != null && (
+              <CircleMarker
+                center={[o.dropoff_lat, o.dropoff_lng] as LatLngExpression}
+                pathOptions={{ color: "#f59e0b" }}
+                radius={5}
+              >
+                <Popup>Order {o.id} dropoff (unassigned)</Popup>
+              </CircleMarker>
+            )}
+          </Fragment>
+        ))}
     </MapContainer>
   );
-} 
+}

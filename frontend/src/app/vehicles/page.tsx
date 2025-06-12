@@ -1,6 +1,5 @@
 "use client";
-import { useEffect, useState, Fragment, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Popup, MapContainerProps, TileLayerProps } from "react-leaflet";
+import { useEffect, useState, Fragment } from "react";
 import "leaflet/dist/leaflet.css";
 import dynamic from "next/dynamic";
 import { io } from "socket.io-client";
@@ -11,6 +10,32 @@ interface Vehicle {
   status: string;
   current_lat?: number | null;
   current_lng?: number | null;
+}
+
+interface Order {
+  id: number;
+  pickup_lat?: number | null;
+  pickup_lng?: number | null;
+  dropoff_lat?: number | null;
+  dropoff_lng?: number | null;
+}
+
+interface Location {
+  latitude: number;
+  longitude: number;
+}
+
+interface Stop {
+  order_id: number;
+  location: Location;
+  type: string;
+}
+
+interface OptimizedRoute {
+  vehicle_id: number;
+  stops: Stop[];
+  total_distance?: number | null;
+  total_time?: number | null;
 }
 
 const PAGE_SIZE = 5;
@@ -37,6 +62,10 @@ export default function VehiclesPage() {
     current_lng: "",
   });
   const [editError, setEditError] = useState<string | null>(null);
+
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [optimizedRoutes, setOptimizedRoutes] = useState<OptimizedRoute[]>([]);
+  const [unassignedOrders, setUnassignedOrders] = useState<number[]>([]);
 
   // Filtering and pagination state
   const [filterStatus, setFilterStatus] = useState("");
@@ -77,6 +106,13 @@ export default function VehiclesPage() {
       socket.disconnect();
     };
   }, []); // Run once on mount
+
+  useEffect(() => {
+    fetch("http://localhost:8000/orders?limit=100")
+      .then((res) => res.json())
+      .then((data) => setOrders(data))
+      .catch(() => console.error("Could not fetch orders"));
+  }, []);
 
   // Fetch vehicles with filters and pagination
   useEffect(() => {
@@ -246,6 +282,47 @@ export default function VehiclesPage() {
     setTelemetryError(null);
   }
 
+  async function handleOptimizeRoutes() {
+    setError(null);
+    try {
+      const orderPayload = orders
+        .filter(
+          (o) =>
+            o.pickup_lat != null &&
+            o.pickup_lng != null &&
+            o.dropoff_lat != null &&
+            o.dropoff_lng != null
+        )
+        .map((o) => ({
+          id: o.id,
+          pickup_location: { latitude: o.pickup_lat!, longitude: o.pickup_lng! },
+          dropoff_location: { latitude: o.dropoff_lat!, longitude: o.dropoff_lng! },
+        }));
+
+      const vehiclePayload = vehicles
+        .filter((v) => v.current_lat != null && v.current_lng != null)
+        .map((v) => ({
+          id: v.id,
+          start_location: { latitude: v.current_lat!, longitude: v.current_lng! },
+        }));
+
+      const res = await fetch("http://localhost:8000/optimize_routes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orders: orderPayload, vehicles: vehiclePayload }),
+      });
+      if (!res.ok) throw new Error("Failed to optimize");
+      const data = await res.json();
+      setOptimizedRoutes(data.optimized_routes || []);
+      setUnassignedOrders(data.unassigned_orders || []);
+    } catch (err) {
+      console.error(err);
+      setError("Failed to optimize routes");
+    }
+  }
+
+
+
   return (
     <div className="max-w-2xl mx-auto p-6">
       <h1 className="text-2xl font-bold mb-4">Vehicles</h1>
@@ -321,9 +398,22 @@ export default function VehiclesPage() {
         <button type="submit" className="bg-green-600 text-white px-3 py-1 rounded col-span-2">Add Vehicle</button>
         {formError && <div className="text-red-600 col-span-2">{formError}</div>}
       </form>
-      {/* Map */}
-      <div className="mb-6">
-        <MapWrapper vehicles={vehicles} selectedVehicleId={selectedVehicleId} />
+      {/* Map and optimization */}
+      <div className="mb-6 space-y-2">
+        <button
+          type="button"
+          onClick={handleOptimizeRoutes}
+          className="bg-purple-600 text-white px-3 py-1 rounded"
+        >
+          Optimize Routes
+        </button>
+        <MapWrapper
+          vehicles={vehicles}
+          selectedVehicleId={selectedVehicleId}
+          optimizedRoutes={optimizedRoutes}
+          unassignedOrders={unassignedOrders}
+          orders={orders}
+        />
       </div>
       {/* List vehicles */}
       {loading ? (

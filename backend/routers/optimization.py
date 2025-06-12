@@ -86,6 +86,7 @@ async def optimize_routes(request: OptimizeRouteRequest):
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
         return time_matrix[from_node][to_node]
+    
 
     distance_cb = routing.RegisterTransitCallback(distance_callback)
     time_cb = routing.RegisterTransitCallback(time_callback)
@@ -98,6 +99,9 @@ async def optimize_routes(request: OptimizeRouteRequest):
     distance_dimension = routing.GetDimensionOrDie("Distance")
     time_dimension = routing.GetDimensionOrDie("Time")
 
+    # Large penalty to discourage dropping an order
+    drop_penalty = 10**7
+
     for pickup_idx, drop_idx, oid in pickup_drop_indices:
         pickup_i = manager.NodeToIndex(pickup_idx)
         drop_i = manager.NodeToIndex(drop_idx)
@@ -109,6 +113,8 @@ async def optimize_routes(request: OptimizeRouteRequest):
             distance_dimension.CumulVar(pickup_i)
             <= distance_dimension.CumulVar(drop_i)
         )
+
+        routing.AddDisjunction([pickup_i, drop_i], drop_penalty)
 
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
@@ -149,4 +155,7 @@ async def optimize_routes(request: OptimizeRouteRequest):
     else:
         unassigned_orders = [o.id for o in orders]
 
-    return OptimizedRouteResponse(optimized_routes=optimized_routes, unassigned_orders=unassigned_orders)
+    return OptimizedRouteResponse(
+        optimized_routes=optimized_routes,
+        unassigned_orders=unassigned_orders,
+    )
